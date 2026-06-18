@@ -10,8 +10,9 @@
 
 <!-- Describe the tests you ran, or note if this is a docs-only change. -->
 
-- [ ] `dotnet build NfsSharp.sln --configuration Release`
-- [ ] `dotnet test NfsSharp.sln --configuration Release`
+- [ ] `dotnet restore NfsSharp.sln`
+- [ ] `dotnet build NfsSharp.sln --configuration Release --no-restore`
+- [ ] `dotnet test NfsSharp.sln --configuration Release --no-build --no-restore`
 
 ## Checklist
 
