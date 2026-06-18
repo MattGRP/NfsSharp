@@ -76,7 +76,7 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
-      description: Provide the smallest code sample and server setup that reproduce the issue.
+      description: Provide the smallest code sample and server setup that reproduces the issue.
       placeholder: |
         1. Connect to ...
         2. Mount ...
