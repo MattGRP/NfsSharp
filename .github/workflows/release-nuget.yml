@@ -23,7 +23,7 @@ permissions:
 
 env:
   CONFIGURATION: Release
-  NUGET_USER: GaTT
+  NUGET_USER: ${{ vars.NUGET_USER || github.repository_owner }}
 
 jobs:
   pack-and-publish:

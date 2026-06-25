@@ -97,8 +97,11 @@ await client.UnMountDeviceAsync();
 
 ## 文档
 
+- [快速开始](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/getting-started.md)
+- [API 概览](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/api-overview.md)
 - [路线图](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/roadmap.md)
 - [NFS 兼容性矩阵](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/nfs-compatibility.md)
+- [维护者发布指南](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/maintainer-release.md)
 
 ## 构建与测试
 

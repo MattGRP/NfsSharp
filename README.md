@@ -124,8 +124,11 @@ Console.WriteLine($"{attributes.Size} bytes");
 
 ## Documentation
 
+- [Getting started](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/getting-started.md)
+- [API overview](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/api-overview.md)
 - [Roadmap](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/roadmap.md)
 - [NFS compatibility matrix](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/nfs-compatibility.md)
+- [Maintainer release guide](https://github.com/GaTTGeng/NfsSharp/blob/HEAD/docs/maintainer-release.md)
 
 ## Build
 
