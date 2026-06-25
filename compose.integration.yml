@@ -1,0 +1,23 @@
+name: nfssharp-integration
+
+services:
+  nfs:
+    build:
+      context: tests/integration/nfs-server
+    image: nfssharp/nfsv3-test:ubuntu24.04-ganesha4.3
+    ports:
+      - "111:111/tcp"
+      - "2049:2049/tcp"
+      - "20048:20048/tcp"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          rpcinfo -t 127.0.0.1 100000 2 >/dev/null &&
+          rpcinfo -t 127.0.0.1 100005 3 >/dev/null &&
+          rpcinfo -t 127.0.0.1 100003 3 >/dev/null &&
+          showmount -e 127.0.0.1 | grep -q '^/export '
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
