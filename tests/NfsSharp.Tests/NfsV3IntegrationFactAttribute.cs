@@ -1,0 +1,40 @@
+namespace NfsSharp.Tests;
+
+public sealed class NfsV3IntegrationFactAttribute : FactAttribute
+{
+    public NfsV3IntegrationFactAttribute()
+    {
+        if (!NfsV3IntegrationEnvironment.IsEnabled)
+            Skip = "Set NFSSHARP_RUN_NFSV3_INTEGRATION=1 to run real-server NFSv3 tests.";
+    }
+}
+
+internal static class NfsV3IntegrationEnvironment
+{
+    public static bool IsEnabled =>
+        string.Equals(
+            Environment.GetEnvironmentVariable("NFSSHARP_RUN_NFSV3_INTEGRATION"),
+            "1",
+            StringComparison.Ordinal);
+
+    public static string Server =>
+        Environment.GetEnvironmentVariable("NFSSHARP_NFS_SERVER") ?? "127.0.0.1";
+
+    public static string ExportPath =>
+        Environment.GetEnvironmentVariable("NFSSHARP_NFS_EXPORT") ?? "/export";
+
+    public static uint UserId => ReadUInt32("NFSSHARP_NFS_UID");
+
+    public static uint GroupId => ReadUInt32("NFSSHARP_NFS_GID");
+
+    private static uint ReadUInt32(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value))
+            return 0;
+
+        return uint.TryParse(value, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException($"{name} must be an unsigned integer.");
+    }
+}

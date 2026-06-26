@@ -78,3 +78,55 @@ jobs:
             artifacts/packages/*.nupkg
             artifacts/packages/*.snupkg
           if-no-files-found: error
+
+  nfs-v3-integration:
+    name: NFSv3 integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Start NFSv3 test server
+        run: docker compose -f compose.integration.yml up --build --detach --wait --wait-timeout 90
+
+      - name: Run NFSv3 integration tests
+        env:
+          NFSSHARP_RUN_NFSV3_INTEGRATION: "1"
+          NFSSHARP_NFS_SERVER: 127.0.0.1
+          NFSSHARP_NFS_EXPORT: /export
+          NFSSHARP_NFS_UID: "0"
+          NFSSHARP_NFS_GID: "0"
+        run: >
+          dotnet test tests/NfsSharp.Tests/NfsSharp.Tests.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --filter "Category=Integration"
+          --logger trx
+          --results-directory TestResults/NfsV3Integration
+
+      - name: Capture NFSv3 server logs
+        if: always()
+        run: |
+          mkdir -p TestResults/NfsV3Integration
+          docker compose -f compose.integration.yml ps --all > TestResults/NfsV3Integration/compose-ps.txt
+          docker compose -f compose.integration.yml logs --no-color > TestResults/NfsV3Integration/nfs-server.log
+
+      - name: Upload NFSv3 integration results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nfs-v3-integration-results
+          path: TestResults/NfsV3Integration
+          if-no-files-found: error
+
+      - name: Stop NFSv3 test server
+        if: always()
+        run: docker compose -f compose.integration.yml down --volumes --remove-orphans
