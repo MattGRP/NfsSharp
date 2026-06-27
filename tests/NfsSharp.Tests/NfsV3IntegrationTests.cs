@@ -21,7 +21,8 @@ public sealed class NfsV3IntegrationTests
             exports,
             export => export.Path == NfsV3IntegrationEnvironment.ExportPath);
 
-        Assert.Contains("*", export.Groups);
+        if (NfsV3IntegrationEnvironment.ExpectedExportGroup is { } expectedGroup)
+            Assert.Contains(expectedGroup, export.Groups);
     }
 
     [NfsV3IntegrationFact]
@@ -68,6 +69,49 @@ public sealed class NfsV3IntegrationTests
 
         Assert.NotNull(exception.Status);
         Assert.Contains($"MOUNT \"{MissingExportPath}\" failed", exception.Message);
+    }
+
+    [NfsV3IntegrationFact]
+    [Trait("Category", "Integration")]
+    public async Task NfsV3Client_CreatesLooksUpAndEnumeratesDirectoryMetadata()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var client = await ConnectV3ClientAsync(timeout.Token);
+        var directory = CreateUniquePath("metadata");
+
+        try
+        {
+            var created = await client.CreateDirectoryAsync(directory, timeout.Token);
+            Assert.NotEmpty(created.Handle);
+
+            var lookup = await client.LookupPathAsync(directory, timeout.Token);
+            Assert.NotEmpty(lookup.Handle);
+
+            var attributes = await client.GetAttributesAsync(directory, timeout.Token);
+            Assert.Equal(NfsType.Dir, attributes.Type);
+            Assert.True(attributes.Mode > 0);
+            Assert.True(attributes.FileId > 0);
+
+            Assert.True(await client.FileExistsAsync(directory, timeout.Token));
+            Assert.True(await client.IsDirectoryAsync(directory, timeout.Token));
+            Assert.False(await client.FileExistsAsync($"{directory}/missing", timeout.Token));
+
+            var entries = await client.ReadDirAsync(".", timeout.Token);
+            Assert.Contains(entries, entry => entry.Name == directory);
+
+            var plusEntries = await client.ReadDirPlusAsync(".", timeout.Token);
+            var plusEntry = Assert.Single(plusEntries, entry => entry.Name == directory);
+            Assert.Equal(NfsType.Dir, plusEntry.Attr?.Type);
+            Assert.NotNull(plusEntry.Handle);
+            Assert.NotEmpty(plusEntry.Handle);
+        }
+        finally
+        {
+            if (await client.FileExistsAsync(directory, timeout.Token))
+                await client.DeleteDirectoryAsync(directory, recursive: true, timeout.Token);
+        }
+
+        Assert.False(await client.FileExistsAsync(directory, timeout.Token));
     }
 
     [NfsV3IntegrationFact]
@@ -174,6 +218,16 @@ public sealed class NfsV3IntegrationTests
             CommandTimeout = TimeSpan.FromSeconds(10),
             MaxRetries = 0
         };
+
+    private static Task<NfsV3Client> ConnectV3ClientAsync(CancellationToken ct) =>
+        NfsV3Client.ConnectAsync(
+            NfsV3IntegrationEnvironment.Server,
+            NfsV3IntegrationEnvironment.ExportPath,
+            CreateOptions(),
+            ct);
+
+    private static string CreateUniquePath(string prefix) =>
+        $"{prefix}-{Guid.NewGuid():N}";
 
     [NfsV3IntegrationFact]
     [Trait("Category", "Integration")]
