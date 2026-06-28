@@ -156,6 +156,112 @@ public sealed class NfsV3IntegrationTests
 
     [NfsV3IntegrationFact]
     [Trait("Category", "Integration")]
+    public async Task NfsV3Client_VerifiesLookupAttributesAccessAndExpectedFailures()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var client = await ConnectV3ClientAsync(timeout.Token);
+        await using var fixture = await NfsV3IntegrationFixture.CreateAsync(client, timeout.Token);
+
+        var rootLookup = await client.LookupPathAsync(".", timeout.Token);
+        Assert.Equal(client.RootHandle, rootLookup.Handle);
+        Assert.Equal(NfsType.Dir, rootLookup.Attr?.Type);
+
+        var fixtureRoot = await client.LookupPathAsync(NfsV3IntegrationFixture.RootDirectory, timeout.Token);
+        AssertLookupAttributes(fixtureRoot, NfsType.Dir);
+        var fixtureRootAttributes = await client.GetAttributesAsync(fixtureRoot.Handle, timeout.Token);
+        Assert.Equal(fixtureRoot.Attr!.FileId, fixtureRootAttributes.FileId);
+        Assert.Equal(0x1EDu, fixtureRootAttributes.Mode & 0x1FF);
+
+        var nestedDirectory = await client.GetAttributesAsync(
+            NfsV3IntegrationFixture.NestedDirectory,
+            timeout.Token);
+        Assert.Equal(NfsType.Dir, nestedDirectory.Type);
+        Assert.Equal(0x1EDu, nestedDirectory.Mode & 0x1FF);
+        Assert.True(nestedDirectory.FileSystemId > 0);
+
+        var fileLookup = await client.LookupPathAsync(NfsV3IntegrationFixture.SmallFilePath, timeout.Token);
+        AssertLookupAttributes(fileLookup, NfsType.Reg);
+        var fileByHandle = await client.GetAttributesAsync(fileLookup.Handle, timeout.Token);
+        Assert.Equal(NfsV3IntegrationFixture.SmallFile.Size, fileByHandle.Size);
+        Assert.Equal(NfsV3IntegrationFixture.SmallFile.Mode, fileByHandle.Mode & 0x1FF);
+        Assert.Equal(fileLookup.Attr!.FileId, fileByHandle.FileId);
+        AssertCloseTo(NfsV3IntegrationFixture.TimestampUtc, fileByHandle.Mtime);
+        Assert.NotNull(fileByHandle.Atime);
+        Assert.NotNull(fileByHandle.Ctime);
+
+        var fileAccess = await client.AccessAsync(
+            NfsV3IntegrationFixture.SmallFilePath,
+            NfsAccessMode.Read | NfsAccessMode.Modify | NfsAccessMode.Extend,
+            timeout.Token);
+        AssertAccessGranted(fileAccess, NfsAccessMode.Read | NfsAccessMode.Modify | NfsAccessMode.Extend);
+
+        var directoryAccess = await client.AccessAsync(
+            fixtureRoot.Handle,
+            NfsAccessMode.Read | NfsAccessMode.Lookup,
+            timeout.Token);
+        AssertAccessGranted(directoryAccess, NfsAccessMode.Read | NfsAccessMode.Lookup);
+
+        var missing = await Assert.ThrowsAsync<NfsException>(
+            () => client.LookupPathAsync($"{NfsV3IntegrationFixture.RootDirectory}/missing", timeout.Token));
+        Assert.True(missing.IsNotFound);
+        Assert.Equal(NfsV3Status.NoEnt, missing.Status);
+
+        var notDirectory = await Assert.ThrowsAsync<NfsException>(
+            () => client.LookupPathAsync($"{NfsV3IntegrationFixture.SmallFilePath}/child", timeout.Token));
+        Assert.Equal(NfsV3Status.NotDir, notDirectory.Status);
+    }
+
+    [NfsV3IntegrationFact]
+    [Trait("Category", "Integration")]
+    public async Task NfsV3Client_VerifiesSymbolicLinkLookupAndTraversalBoundaries()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var client = await ConnectV3ClientAsync(timeout.Token);
+        await using var fixture = await NfsV3IntegrationFixture.CreateAsync(client, timeout.Token);
+
+        var traversal = await Assert.ThrowsAsync<NfsException>(
+            () => client.LookupPathAsync($"{NfsV3IntegrationFixture.RootDirectory}/../outside", timeout.Token));
+        Assert.Null(traversal.Status);
+        Assert.Contains("Parent path traversal", traversal.Message);
+
+        if (!fixture.Capabilities.SupportsSymbolicLinks)
+            return;
+
+        var lookup = await client.LookupPathAsync(NfsV3IntegrationFixture.SymlinkPath, timeout.Token);
+        AssertLookupAttributes(lookup, NfsType.Lnk);
+
+        var targetByPath = await client.ReadLinkAsync(NfsV3IntegrationFixture.SymlinkPath, timeout.Token);
+        var targetByHandle = await client.ReadLinkAsync(lookup.Handle, timeout.Token);
+        Assert.Equal(NfsV3IntegrationFixture.SymlinkTarget, targetByPath);
+        Assert.Equal(targetByPath, targetByHandle);
+    }
+
+    [NfsV3IntegrationFact]
+    [Trait("Category", "Integration")]
+    public async Task NfsV3Client_VerifiesRestrictedPathAccessBehavior()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var setupClient = await ConnectV3ClientAsync(timeout.Token);
+        await using var fixture = await NfsV3IntegrationFixture.CreateAsync(setupClient, timeout.Token);
+
+        if (!fixture.Capabilities.AppliesRestrictedModeBits)
+            return;
+
+        await using var deniedClient = await ConnectV3ClientAsync(userId: 65534, groupId: 65534, timeout.Token);
+
+        var granted = await deniedClient.AccessAsync(
+            NfsV3IntegrationFixture.RestrictedDirectory,
+            NfsAccessMode.Read | NfsAccessMode.Lookup,
+            timeout.Token);
+        Assert.Equal(NfsAccessMode.None, granted & (NfsAccessMode.Read | NfsAccessMode.Lookup));
+
+        var denied = await Assert.ThrowsAsync<NfsException>(
+            () => deniedClient.GetAttributesAsync(NfsV3IntegrationFixture.RestrictedFilePath, timeout.Token));
+        Assert.Contains(denied.Status, new uint?[] { NfsV3Status.Access, NfsV3Status.Perm });
+    }
+
+    [NfsV3IntegrationFact]
+    [Trait("Category", "Integration")]
     public async Task NfsV3Client_ReadDirCoversEmptySmallAndNestedFixtureDirectories()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -346,11 +452,14 @@ public sealed class NfsV3IntegrationTests
             () => client.GetExportedDevicesAsync(canceled.Token));
     }
 
-    private static NfsClientOptions CreateOptions(int? readdirCount = null) =>
+    private static NfsClientOptions CreateOptions(
+        int? readdirCount = null,
+        uint? userId = null,
+        uint? groupId = null) =>
         new()
         {
-            UserId = NfsV3IntegrationEnvironment.UserId,
-            GroupId = NfsV3IntegrationEnvironment.GroupId,
+            UserId = userId ?? NfsV3IntegrationEnvironment.UserId,
+            GroupId = groupId ?? NfsV3IntegrationEnvironment.GroupId,
             UsePrivilegedSourcePort = false,
             CommandTimeout = TimeSpan.FromSeconds(10),
             MaxRetries = 0,
@@ -369,6 +478,13 @@ public sealed class NfsV3IntegrationTests
             NfsV3IntegrationEnvironment.Server,
             NfsV3IntegrationEnvironment.ExportPath,
             CreateOptions(readdirCount),
+            ct);
+
+    private static Task<NfsV3Client> ConnectV3ClientAsync(uint userId, uint groupId, CancellationToken ct) =>
+        NfsV3Client.ConnectAsync(
+            NfsV3IntegrationEnvironment.Server,
+            NfsV3IntegrationEnvironment.ExportPath,
+            CreateOptions(userId: userId, groupId: groupId),
             ct);
 
     private static string CreateUniquePath(string prefix) =>
@@ -403,6 +519,24 @@ public sealed class NfsV3IntegrationTests
 
     private static NfsEntryPlus AssertContainsEntry(IEnumerable<NfsEntryPlus> entries, string name) =>
         Assert.Single(entries, entry => entry.Name == name);
+
+    private static void AssertLookupAttributes(NfsLookup lookup, NfsType type)
+    {
+        Assert.NotEmpty(lookup.Handle);
+        Assert.NotNull(lookup.Attr);
+        Assert.Equal(type, lookup.Attr.Type);
+        Assert.True(lookup.Attr.FileId > 0);
+    }
+
+    private static void AssertAccessGranted(NfsAccessMode actual, NfsAccessMode expected) =>
+        Assert.Equal(expected, actual & expected);
+
+    private static void AssertCloseTo(DateTime expectedUtc, DateTime? actualUtc)
+    {
+        Assert.NotNull(actualUtc);
+        var delta = (actualUtc.Value.ToUniversalTime() - expectedUtc).Duration();
+        Assert.True(delta <= TimeSpan.FromSeconds(2), $"Expected {actualUtc:o} to be within 2 seconds of {expectedUtc:o}.");
+    }
 
     private static void AssertDirectoryEntries(IEnumerable<string> actualNames, string[] expectedNames)
     {
